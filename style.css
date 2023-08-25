@@ -1,0 +1,463 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: "Open Sans", sans-serif, "Helvetica Neue", Helvetica, Arial;
+}
+
+body {
+    background: #fcfcfc;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+
+
+.navbar {
+    display: grid;
+    grid-template-columns: 1fr 300px; /* Logo takes whatever space it needs, while the search bar and button together take 300px */
+    padding: 10px 20px;
+    background-color: #000; /* Color to match the bottom part of the footer */
+    color: white;
+    align-items: center;
+}
+
+.brand-logo {
+    font-size: 1.5em;
+    font-weight: bold;
+    padding-right: 20px; /* Some spacing between logo and search bar */
+}
+
+.search-container {
+    display: flex;
+    justify-content: flex-end;
+}
+
+#nav-search-box {
+    padding: 4px 8px; /* Reduced padding */
+    width: 200px; /* Set a fixed width */
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    margin-right: 10px;
+    font-size: 0.9em; /* Reduced font size */
+}
+
+#nav-search-button {
+    padding: 4px 8px; /* Reduced padding */
+    border: none;
+    border-radius: 5px;
+    background-color: #007BFF;
+    color: white;
+    cursor: pointer;
+    font-size: 0.9em; /* Reduced font size */
+}
+
+#nav-search-button:hover {
+    background-color: #0056b3;
+}
+
+
+
+
+footer {
+    background: #111;
+    padding-top: 40px;
+    color: #fff;
+    margin-top: auto;
+}
+
+.footer-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+}
+
+.footer-content p {
+    max-width: 540px;
+    margin: 10px auto;
+    line-height: 18px;
+    font-size: 14px;
+}
+
+.socials {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 1rem 0 3rem 0;
+}
+
+.socials a {
+    text-decoration: none;
+    color: #fff;
+}
+
+.socials a i {
+    font-size: 1.1rem;
+    transition: color .4s ease;
+}
+
+.socials a:hover i {
+    color: aqua;
+}
+
+.footer-bottom {
+    background: #000;
+    padding: 20px 0;
+    text-align: center;
+}
+
+.footer-bottom p {
+    font-size: 14px;
+    word-spacing: 2px;
+    text-transform: capitalize;
+}
+
+.footer-bottom span {
+    text-transform: uppercase;
+    opacity: .4;
+    font-weight: 200;
+}
+
+/* Search Bar and Button Styles */
+/* Search Bar and Button Container */
+
+
+input[type="text"] {
+    padding: 10px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    flex: 3;  /* 3 times the space of the button */
+    margin-right: 10px;
+}
+
+button {
+    padding: 10px 15px;
+    border: none;
+    background-color: #007BFF;
+    color: #fff;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    flex: 1;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+
+/* Card Styles */
+#profile-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+}
+
+.card {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 16px;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+    position: relative; /* added this line */
+    max-width: 60%;
+    margin: 16px auto; 
+    height: 180px; /* adjust as per your preference */
+    overflow: hidden;
+    width: 50%;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+
+
+
+
+.card img {
+    width: 64px;
+    height: 64px;
+    margin-right: 16px;
+}
+
+
+
+
+.card-status {
+    background-color: rgba(0, 0, 0, 0.6);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 3px;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+
+
+
+.card.win {
+    background-color: rgba(0, 128, 255, 0.2);
+}
+
+.card.lose {
+    background-color: rgba(255, 0, 0, 0.2);
+}
+
+.card-title {
+    font-weight: bold;
+    font-size: 1.2em;
+    margin-bottom: 10px;
+}
+
+.card-details {
+    display: flex;
+    justify-content: space-between;
+    margin-right: 10px;
+}
+
+
+
+
+.card-content {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1;
+    width: 100%;
+}
+
+.kda-status-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center; /* Center the items horizontally */
+}
+
+
+
+
+
+.card-items {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 0;  /* No gap */
+}
+
+
+
+
+.card-items img {
+    height: 30px;
+    width: 30px;
+    display: block;
+    margin: 0;
+}
+
+
+
+
+
+
+
+.kills {
+    color: green;
+    font-weight: bold;
+}
+
+.deaths {
+    color: red;
+    font-weight: bold;
+}
+
+.assists {
+    color: orange;
+    font-weight: bold;
+}
+
+
+.kills, .deaths, .assists {
+    margin: 0 3px; /* 3px horizontal margin */
+}
+
+
+
+
+@media (max-width: 600px) {
+    .card {
+        max-height: 200px; /* Adjust this value based on how much content you expect */
+        width: 90%; /* let it take up more of the screen width */
+    }
+    
+    .card-title {
+        font-size: 1em; /* decrease the font size */
+    }
+    /* Add similar rules for other text elements inside the card if needed */
+}
+
+
+
+/* Search Bar and Button Styles */
+#search-container {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0;
+    max-width: 60%; 
+    margin: 50px auto;
+}
+
+.input-group {
+    display: flex;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    overflow: hidden;
+    flex: 3; 
+}
+
+#search-box {
+    flex: 2.5; 
+    border: none;
+    padding: 10px 8px;
+    font-size: 0.9em;
+}
+
+#search-container select {
+    flex: 1; 
+    border: none;
+    padding: 10px 8px;
+    font-size: 0.9em;
+    background: #f5f5f5;
+}
+
+#search-container button {
+    flex: 0.5; 
+    margin-left: 15px;
+    padding: 10px 15px;
+    border: none;
+    background-color: #007BFF;
+    color: #fff;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    width: 150px; /* Set a fixed width to give button more space */
+}
+
+#search-container button:hover {
+    background-color: #0056b3;
+}
+
+
+
+
+
+
+
+.summoner-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+}
+
+.summoner-details {
+    margin-left: 10px;
+}
+
+
+
+.tier-rank {
+    font-weight: bold;
+    color: #333;
+    font-size: 16px;
+}
+
+.summoner-section img {
+    max-width: 100px;  /* adjust this value as needed */
+    max-height: 100px; /* adjust this value as needed */
+    display: block;   /* ensures the image scales down if it exceeds the max-width or max-height */
+}
+
+
+
+
+
+.summoner-details {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+
+
+.summoner-section {
+    display: flex;
+    align-items: center;
+    justify-content: space-around; 
+    margin-bottom: 20px;
+    width: 100%;
+    max-width: 500px; /* Reduced further to bring items even closer */
+    margin: 0px auto;
+}
+
+.divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 0px; /* Reduced margin further */
+    font-size: 1.5em;
+    font-weight: bold;
+    color: #888;
+    height: 80px; /* Increased from 60px to 80px */
+    align-self: stretch; 
+}
+
+
+/* Remove pseudo-element for the divider */
+.divider::before {
+    display: none;
+}
+
+
+
+
+.summoner-details-left, .summoner-details-right {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1; /* This makes them take equal width */
+}
+
+.summoner-name {
+    font-weight: bold;
+    font-size: 20px;
+    margin-bottom: 5px;
+}
+
+.tier-rank {
+    font-weight: bold;
+    color: #333;
+    font-size: 16px;
+    margin-bottom: 5px;
+}
+
+.wins-losses {
+    color: #555;
+    font-size: 14px;
+}
+
+.rank-emblem {
+    width: 100px;
+    height: auto;
+    margin-bottom: 10
+}
