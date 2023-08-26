@@ -1,11 +1,10 @@
 package middleware
 
 import (
-	"net/http"
-
-	"github.com/rs/cors"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 )
 
-func CorsMiddleware(handler http.Handler) http.Handler {
-	return cors.Default().Handler(handler)
+func Cors() fiber.Handler {
+	return cors.New()
 }

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/mitchellh/mapstructure"
 
 	"github.com/drewfoos/league-finder/internal/utils"
@@ -90,56 +91,43 @@ func getSummonerData(endpoint, apiKey string) (*SummonerData, error) {
 	return &summoner, nil
 }
 
-func SearchHandler(w http.ResponseWriter, r *http.Request) {
+func SearchHandler(c *fiber.Ctx) error {
 	apiKey := strings.TrimSpace(utils.GetApiKeyFromFile(".environment.env"))
 	if apiKey == "" {
-		writeErrorResponse(w, "Error reading API key", "Internal server error", http.StatusInternalServerError)
-		return
+		return c.Status(fiber.StatusInternalServerError).SendString("Internal server error")
 	}
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeErrorResponse(w, "Error reading request body: "+err.Error(), "Failed to read request body", http.StatusInternalServerError)
-		return
-	}
-	defer r.Body.Close()
-
+	body := c.Body()
 	var request UrlRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		writeErrorResponse(w, "Error parsing request body: "+err.Error(), "Failed to parse request body", http.StatusBadRequest)
-		return
+		return c.Status(fiber.StatusBadRequest).SendString("Failed to parse request body")
 	}
 
 	riotBaseUrl, exists := regionMapping[request.Region]
 	if !exists {
-		writeErrorResponse(w, "Invalid region provided: "+request.Region, "Invalid region", http.StatusBadRequest)
-		return
+		return c.Status(fiber.StatusBadRequest).SendString("Invalid region")
 	}
 
 	summoner, err := getSummonerData(fmt.Sprintf("https://%s%s", riotBaseUrl, strings.TrimSpace(request.Url)), apiKey)
 	if err != nil {
-		writeErrorResponse(w, "Error fetching summoner data: "+err.Error(), "Failed to fetch summoner data", http.StatusInternalServerError)
-		return
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch summoner data")
 	}
 
 	matchIDs, err := fetchMatchesByPUUID(summoner.PUUID, apiKey, request.Region)
 	if err != nil {
-		writeErrorResponse(w, "Error fetching matches by PUUID: "+err.Error(), "Failed to fetch matches", http.StatusInternalServerError)
-		return
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch matches")
 	}
 
 	if len(matchIDs) == 0 {
-		writeJSONResponse(w, summoner)
-		return
+		return c.JSON(summoner)
 	}
 
 	participantDataList, err := fetchAndProcessMatchDetailsForIDs(matchIDs, apiKey, summoner.PUUID, request.Region)
 	if err != nil {
-		writeErrorResponse(w, "Error fetching match details: "+err.Error(), "Failed to fetch match details", http.StatusInternalServerError)
-		return
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch match details")
 	}
 
-	writeJSONResponse(w, participantDataList)
+	return c.JSON(participantDataList)
 }
 
 func writeJSONResponse(w http.ResponseWriter, data interface{}) {

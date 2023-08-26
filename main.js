@@ -1,4 +1,4 @@
-const apiUrl = "http://localhost:8080";
+const apiUrl = "http://localhost:3000";
 
 function generateItemsGrid(participant) {
     const items = [participant.item0, participant.item1, participant.item2, participant.item3, participant.item4, participant.item5];
