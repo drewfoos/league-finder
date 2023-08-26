@@ -6,5 +6,9 @@ import (
 )
 
 func Cors() fiber.Handler {
-	return cors.New()
+	return cors.New(cors.Config{
+		AllowOrigins: "https://riftradar.vercel.app",
+		AllowHeaders: "Origin, Content-Type",
+		AllowMethods: "POST, OPTIONS",
+	})
 }

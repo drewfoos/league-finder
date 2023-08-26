@@ -453,7 +453,9 @@ func ExtractParticipantDataAtIndex(matchData map[string]interface{}, apiKey, reg
 	if err != nil {
 		log.Println("Error fetching league data:", err)
 	} else {
-		data.Tier = safeString(leagueData, "tier")
+		tier := strings.ToLower(safeString(leagueData, "tier"))
+		tier = strings.ToUpper(string(tier[0])) + tier[1:]
+		data.Tier = tier
 		data.Rank = safeString(leagueData, "rank")
 		data.LeaguePoints = safeInt(leagueData, "leaguePoints")
 		data.Wins = safeInt(leagueData, "wins")

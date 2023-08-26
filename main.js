@@ -1,4 +1,4 @@
-const apiUrl = "http://localhost:3000";
+const apiUrl = "http://127.0.0.1:3000";
 
 function generateItemsGrid(participant) {
     const items = [participant.item0, participant.item1, participant.item2, participant.item3, participant.item4, participant.item5];
@@ -9,7 +9,9 @@ function generateItemsGrid(participant) {
 
 function generateSummonerSection(participant) {
     const profileIconUrl = `./league_data/img/profileicon/${participant.profileIcon}.png`;
-    const tierAndRank = `${participant.tier} ${participant.rank} (${participant.leaguePoints} LP)`;
+    const tierAndRank = (participant.tier === 'Master' || participant.tier === 'Challenger') ? 
+                        `${participant.tier} (${participant.leaguePoints} LP)` : 
+                        `${participant.tier} ${participant.rank} (${participant.leaguePoints} LP)`;
     const winsLosses = `Wins: ${participant.wins} - Losses: ${participant.losses}`;
     
     return `
@@ -20,13 +22,14 @@ function generateSummonerSection(participant) {
             </div>
             <div class="divider">|</div>
             <div class="summoner-details-right">
-                <img src="./league_data/img/ranked-emblem/cropped-emblem-${participant.tier}.png" alt="${participant.tier} emblem" class="rank-emblem">
+                <img src="./league_data/img/ranked-emblem/${participant.tier}.png" alt="${participant.tier} emblem" class="rank-emblem">
                 <div class="tier-rank">${tierAndRank}</div>
                 <div class="wins-losses">${winsLosses}</div>
             </div>
         </div>
     `;
 }
+
 
 
 
