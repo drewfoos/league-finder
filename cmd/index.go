@@ -9,6 +9,8 @@ import (
 )
 
 func main() {
+	handlers.InitApiKey()
+
 	// Create a new Fiber instance
 	app := fiber.New()
 

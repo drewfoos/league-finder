@@ -169,10 +169,9 @@ button:hover {
     position: relative; /* added this line */
     max-width: 60%;
     margin: 16px auto; 
-    height: 180px; /* adjust as per your preference */
+    height: 160px; /* adjust as per your preference */
     overflow: hidden;
     width: 50%;
-    max-height: 120px;
     overflow-y: auto;
 }
 
@@ -461,3 +460,51 @@ button:hover {
     height: auto;
     margin-bottom: 10
 }
+
+
+
+
+.participants-container {
+    display: flex;
+    justify-content: flex-end;
+    gap: 5px;
+}
+
+.participants-column {
+    display: flex;
+    flex-direction: column;
+}
+
+.other-participant {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0px; /* reduce margin */
+}
+
+.other-participant img {
+    width: 25px;
+    height: 25px;
+    margin: 0;
+}
+
+
+.other-participant-name {
+    font-size: 12px;
+    color: #333;
+    width: 50px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.left-participant .other-participant-name {
+    text-align: right;
+}
+
+.right-participant .other-participant-name {
+    text-align: left;
+}
+
+
+
+

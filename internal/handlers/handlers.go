@@ -4,17 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/drewfoos/league-finder/internal/utils"
 	"github.com/gofiber/fiber/v2"
 	"github.com/mitchellh/mapstructure"
-
-	"github.com/drewfoos/league-finder/internal/utils"
+	"github.com/patrickmn/go-cache"
+	"github.com/valyala/fasthttp"
 )
 
 type CacheItem struct {
@@ -22,8 +22,10 @@ type CacheItem struct {
 	Timestamp time.Time
 }
 
+var apiKey string
+
 // Define a global cache with a mutex for thread-safety
-var leagueDataCache = make(map[string]CacheItem)
+var leagueDataCache = cache.New(24*time.Hour, 30*time.Minute)
 var cacheMutex sync.RWMutex
 var cacheExpiryDuration = time.Hour * 24 // set desired cache expiry duration
 
@@ -56,10 +58,7 @@ type UrlRequest struct {
 }
 
 type SummonerData struct {
-	Name          string `json:"name"`
-	SummonerLevel int    `json:"summonerLevel"`
-	ProfileIconId int    `json:"profileIconId"`
-	PUUID         string `json:"puuid"`
+	PUUID string `json:"puuid"`
 }
 
 func writeErrorResponse(w http.ResponseWriter, logMsg string, httpMsg string, code int) {
@@ -67,55 +66,75 @@ func writeErrorResponse(w http.ResponseWriter, logMsg string, httpMsg string, co
 	http.Error(w, httpMsg, code)
 }
 
+func createRequest(method string, url string, apiKey string) *fasthttp.Request {
+	req := fasthttp.AcquireRequest()
+	req.Header.SetMethod(method)
+	req.SetRequestURI(url)
+	req.Header.Set("X-Riot-Token", apiKey)
+	return req
+}
+
+var summonerDataCache = cache.New(24*time.Hour, 30*time.Minute)
+
 func getSummonerData(endpoint, apiKey string) (*SummonerData, error) {
-	constructedUrl := fmt.Sprintf("%s?api_key=%s", endpoint, apiKey)
-	apiResponse, err := http.Get(constructedUrl)
-	if err != nil {
-		return nil, err
-	}
-	defer apiResponse.Body.Close()
-
-	if apiResponse.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Riot API returned status code: %d", apiResponse.StatusCode)
+	if x, found := summonerDataCache.Get(endpoint); found {
+		return x.(*SummonerData), nil
 	}
 
-	responseData, err := io.ReadAll(apiResponse.Body)
+	req := createRequest("GET", endpoint, apiKey)
+	defer fasthttp.ReleaseRequest(req)
+
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(resp)
+
+	err := fasthttp.Do(req, resp)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to make request: %w", err)
+	}
+
+	statusCode := resp.StatusCode()
+	if statusCode != fasthttp.StatusOK {
+		return nil, fmt.Errorf("Riot API returned non-200 status code %d", statusCode)
 	}
 
 	var summoner SummonerData
-	if err := json.Unmarshal(responseData, &summoner); err != nil {
-		return nil, err
+	err = json.Unmarshal(resp.Body(), &summoner)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
+
+	summonerDataCache.Set(endpoint, &summoner, cache.DefaultExpiration)
+
 	return &summoner, nil
 }
 
-func SearchHandler(c *fiber.Ctx) error {
-	apiKey := strings.TrimSpace(utils.GetApiKeyFromFile(".environment.env"))
+func InitApiKey() {
+	apiKey = strings.TrimSpace(utils.GetApiKeyFromFile(".environment.env"))
 	if apiKey == "" {
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal server error")
+		log.Fatal("API key not found in .environment.env")
 	}
+}
 
+func SearchHandler(c *fiber.Ctx) error {
 	body := c.Body()
 	var request UrlRequest
 	if err := json.Unmarshal(body, &request); err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString("Failed to parse request body")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Failed to parse request body"})
 	}
 
 	riotBaseUrl, exists := regionMapping[request.Region]
 	if !exists {
-		return c.Status(fiber.StatusBadRequest).SendString("Invalid region")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid region"})
 	}
 
 	summoner, err := getSummonerData(fmt.Sprintf("https://%s%s", riotBaseUrl, strings.TrimSpace(request.Url)), apiKey)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch summoner data")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch summoner data"})
 	}
 
 	matchIDs, err := fetchMatchesByPUUID(summoner.PUUID, apiKey, request.Region)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch matches")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch matches"})
 	}
 
 	if len(matchIDs) == 0 {
@@ -124,7 +143,7 @@ func SearchHandler(c *fiber.Ctx) error {
 
 	participantDataList, err := fetchAndProcessMatchDetailsForIDs(matchIDs, apiKey, summoner.PUUID, request.Region)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch match details")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch match details"})
 	}
 
 	return c.JSON(participantDataList)
@@ -181,57 +200,65 @@ func getPlatformForRegion(region string) string {
 	return domain
 }
 
-const baseURLFormatForMatches = "https://%s/lol/match/v5/matches/by-puuid/%s/ids?start=0&count=10&api_key=%s"
+const baseURLFormatForMatches = "https://%s/lol/match/v5/matches/by-puuid/%s/ids?start=0&count=5"
 
 func fetchMatchesByPUUID(puuid string, apiKey string, region string) ([]string, error) {
-	// Construct the URL to fetch match IDs
-	url := fmt.Sprintf(baseURLFormatForMatches, getPlatformForRegion(region), strings.TrimSpace(puuid), strings.TrimSpace(apiKey))
+	url := fmt.Sprintf(baseURLFormatForMatches, getPlatformForRegion(region), strings.TrimSpace(puuid))
 
-	response, err := http.Get(url)
+	req := createRequest("GET", url, apiKey)
+	defer fasthttp.ReleaseRequest(req)
+
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(resp)
+
+	err := fasthttp.Do(req, resp)
 	if err != nil {
 		log.Printf("Error fetching matches by PUUID %s: %v", puuid, err)
 		return nil, err
 	}
-	defer response.Body.Close()
 
-	if response.StatusCode != http.StatusOK {
-		errMsg := fmt.Sprintf("Riot API returned non-200 status code %d while fetching matches by PUUID %s", response.StatusCode, puuid)
+	statusCode := resp.StatusCode()
+	if statusCode != fasthttp.StatusOK {
+		errMsg := fmt.Sprintf("Riot API returned non-200 status code %d while fetching matches by PUUID %s", statusCode, puuid)
 		log.Println(errMsg)
 		return nil, errors.New(errMsg)
 	}
 
 	var matchIDs []string
-	if err := json.NewDecoder(response.Body).Decode(&matchIDs); err != nil {
+	if err := json.Unmarshal(resp.Body(), &matchIDs); err != nil {
 		log.Printf("Error decoding JSON response from Riot API for PUUID %s: %v", puuid, err)
 		return nil, err
 	}
 
-	//log.Printf("Fetched match IDs for PUUID %s: %v", puuid, matchIDs)
 	return matchIDs, nil
 }
 
-// Fetch detailed match data for a given match ID
-const baseURLFormat = "https://%s/lol/match/v5/matches/%s?api_key=%s"
+const baseURLFormat = "https://%s/lol/match/v5/matches/%s"
 
 func fetchMatchDetails(matchID string, apiKey string, region string) (map[string]interface{}, error) {
-	// Construct the URL to fetch detailed match data
-	url := fmt.Sprintf(baseURLFormat, getPlatformForRegion(region), strings.TrimSpace(matchID), strings.TrimSpace(apiKey))
+	url := fmt.Sprintf(baseURLFormat, getPlatformForRegion(region), strings.TrimSpace(matchID))
 
-	response, err := http.Get(url)
+	req := createRequest("GET", url, apiKey)
+	defer fasthttp.ReleaseRequest(req)
+
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(resp)
+
+	err := fasthttp.Do(req, resp)
 	if err != nil {
 		log.Printf("Error fetching match details for match ID %s: %v", matchID, err)
 		return nil, err
 	}
-	defer response.Body.Close()
 
-	if response.StatusCode != http.StatusOK {
-		errMsg := fmt.Sprintf("Riot API returned non-200 status code %d while fetching match details for match ID %s", response.StatusCode, matchID)
+	statusCode := resp.StatusCode()
+	if statusCode != fasthttp.StatusOK {
+		errMsg := fmt.Sprintf("Riot API returned non-200 status code %d while fetching match details for match ID %s", statusCode, matchID)
 		log.Println(errMsg)
 		return nil, errors.New(errMsg)
 	}
 
 	var matchData map[string]interface{}
-	if err := json.NewDecoder(response.Body).Decode(&matchData); err != nil {
+	if err := json.Unmarshal(resp.Body(), &matchData); err != nil {
 		log.Printf("Error decoding match details from Riot API for match ID %s: %v", matchID, err)
 		return nil, err
 	}
@@ -245,62 +272,74 @@ type ParticipantDataList struct {
 
 func fetchAndProcessMatchDetailsForIDs(matchIDs []string, apiKey string, puuid string, region string) (ParticipantDataList, error) {
 	var dataList ParticipantDataList
-	dataList.Data = make([]ParticipantData, 0, len(matchIDs)) // preallocate with expected length
+	dataList.Data = make([]ParticipantData, 0)
 
 	var wg sync.WaitGroup
-	errCh := make(chan string, len(matchIDs)) // error channel
+	var once sync.Once
+	errCh := make(chan string, len(matchIDs))
+	errChMutex := &sync.Mutex{}
 
-	sem := make(chan struct{}, 10) // adjust based on rate limits or desired concurrency
+	sem := make(chan struct{}, 10)
 
 	for _, matchID := range matchIDs {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			sem <- struct{}{}        // Acquire a token
-			defer func() { <-sem }() // Release the token after the goroutine completes
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
 			matchData, err := fetchMatchDetails(id, apiKey, region)
 			if err != nil {
+				errChMutex.Lock()
 				errCh <- "Error fetching details for match ID: " + id + " - " + err.Error()
+				errChMutex.Unlock()
 				return
 			}
 
 			metadata, exists := matchData["metadata"].(map[string]interface{})
 			if !exists {
+				errChMutex.Lock()
 				errCh <- "metadata doesn't exist for match ID: " + id
+				errChMutex.Unlock()
 				return
 			}
 
 			participants, exists := metadata["participants"].([]interface{})
 			if !exists {
+				errChMutex.Lock()
 				errCh <- "No participants array in metadata for match ID: " + id
+				errChMutex.Unlock()
 				return
 			}
 
+			var mainParticipantIndex int
 			for index, participant := range participants {
 				participantPUUID, ok := participant.(string)
 				if ok && participantPUUID == puuid {
-					participantData, err := ExtractParticipantDataAtIndex(matchData, apiKey, region, index)
-					if err != nil {
-						errCh <- "Error extracting participant data for match ID: " + id + " - " + err.Error()
-						return
-					}
-
-					dataList.Data = append(dataList.Data, *participantData)
-					return
+					mainParticipantIndex = index
+					break
 				}
 			}
-			errCh <- "Couldn't find participant with the given PUUID in the match data for match ID: " + id
 
+			participantDataList, err := ExtractParticipantData(matchData, metadata, apiKey, region, mainParticipantIndex)
+			if err != nil {
+				errChMutex.Lock()
+				errCh <- "Error extracting participant data for match ID: " + id + " - " + err.Error()
+				errChMutex.Unlock()
+				return
+			}
+
+			cacheMutex.Lock()
+			dataList.Data = append(dataList.Data, participantDataList...)
+			cacheMutex.Unlock()
 		}(matchID)
 	}
 
 	go func() {
 		wg.Wait()
-		close(errCh) // close error channel once all goroutines are done
+		once.Do(func() { close(errCh) })
 	}()
 
-	// Log errors concurrently
 	for err := range errCh {
 		log.Println(err)
 	}
@@ -309,6 +348,8 @@ func fetchAndProcessMatchDetailsForIDs(matchIDs []string, apiKey string, puuid s
 }
 
 type ParticipantData struct {
+	MatchId                        string `json:"matchId"`
+	IsMainParticipant              bool   `json:"isMainParticipant"`
 	Assists                        int    `json:"assists"`
 	BaronKills                     int    `json:"baronKills"`
 	BountyLevel                    int    `json:"bountyLevel"`
@@ -420,8 +461,7 @@ type ParticipantData struct {
 	Losses                         int    `json:"losses"`
 }
 
-// ExtractParticipantDataAtIndex extracts the data of a participant at a specific index from matchData
-func ExtractParticipantDataAtIndex(matchData map[string]interface{}, apiKey, region string, index int) (*ParticipantData, error) {
+func ExtractParticipantData(matchData map[string]interface{}, metadata map[string]interface{}, apiKey, region string, mainParticipantIndex int) ([]ParticipantData, error) {
 	// Access the info key to get the participants data
 	info, exists := matchData["info"].(map[string]interface{})
 	if !exists {
@@ -429,40 +469,60 @@ func ExtractParticipantDataAtIndex(matchData map[string]interface{}, apiKey, reg
 	}
 
 	participants, ok := info["participants"].([]interface{})
-	if !ok || index < 0 || index >= len(participants) {
-		return nil, errors.New("Invalid participants data or index")
-	}
-
-	participantMap, ok := participants[index].(map[string]interface{})
 	if !ok {
-		return nil, errors.New("Participant data at specified index is not of expected type")
+		return nil, errors.New("Invalid participants data")
 	}
 
-	data := &ParticipantData{}
-	err := mapstructure.Decode(participantMap, data)
-	if err != nil {
-		return nil, err
+	if mainParticipantIndex < 0 || mainParticipantIndex >= len(participants) {
+		return nil, errors.New("Invalid main participant index")
 	}
 
-	// Ensure summonerId exists before fetching league data
-	if data.SummonerId == "" {
-		return nil, errors.New("failed to retrieve summoner ID for participant")
+	var dataList []ParticipantData
+
+	matchId := safeString(metadata, "matchId")
+
+	for i, participant := range participants {
+		participantMap, ok := participant.(map[string]interface{})
+		if !ok {
+			return nil, errors.New("Participant data at specified index is not of expected type")
+		}
+
+		data := &ParticipantData{}
+		err := mapstructure.Decode(participantMap, data)
+		if err != nil {
+			return nil, err
+		}
+
+		if i == mainParticipantIndex {
+			// Ensure summonerId exists before fetching league data
+			if data.SummonerId == "" {
+				return nil, errors.New("failed to retrieve summoner ID for participant")
+			}
+
+			leagueData, err := fetchLeagueDataBySummonerID(data.SummonerId, apiKey, region)
+			if err != nil {
+				log.Println("Error fetching league data:", err)
+			} else {
+				tier := strings.ToLower(safeString(leagueData, "tier"))
+				tier = strings.ToUpper(string(tier[0])) + tier[1:]
+				data.Tier = tier
+				data.Rank = safeString(leagueData, "rank")
+				data.LeaguePoints = safeInt(leagueData, "leaguePoints")
+				data.Wins = safeInt(leagueData, "wins")
+				data.Losses = safeInt(leagueData, "losses")
+			}
+
+			data.IsMainParticipant = true
+		} else {
+			data.IsMainParticipant = false
+		}
+
+		data.MatchId = matchId
+
+		dataList = append(dataList, *data)
 	}
 
-	leagueData, err := fetchLeagueDataBySummonerID(data.SummonerId, apiKey, region)
-	if err != nil {
-		log.Println("Error fetching league data:", err)
-	} else {
-		tier := strings.ToLower(safeString(leagueData, "tier"))
-		tier = strings.ToUpper(string(tier[0])) + tier[1:]
-		data.Tier = tier
-		data.Rank = safeString(leagueData, "rank")
-		data.LeaguePoints = safeInt(leagueData, "leaguePoints")
-		data.Wins = safeInt(leagueData, "wins")
-		data.Losses = safeInt(leagueData, "losses")
-	}
-
-	return data, nil
+	return dataList, nil
 }
 
 func safeString(data map[string]interface{}, key string) string {
@@ -488,11 +548,8 @@ func safeBool(data map[string]interface{}, key string) bool {
 
 func fetchLeagueDataBySummonerID(summonerID string, apiKey string, region string) (map[string]interface{}, error) {
 	// Check cache first
-	cacheMutex.RLock()
-	cachedItem, exists := leagueDataCache[summonerID]
-	cacheMutex.RUnlock()
-	if exists && time.Since(cachedItem.Timestamp) < cacheExpiryDuration {
-		return cachedItem.Data, nil
+	if x, found := leagueDataCache.Get(summonerID); found {
+		return x.(map[string]interface{}), nil
 	}
 
 	riotBaseUrl, exists := regionMapping[region]
@@ -501,30 +558,32 @@ func fetchLeagueDataBySummonerID(summonerID string, apiKey string, region string
 	}
 
 	url := fmt.Sprintf("https://%s/lol/league/v4/entries/by-summoner/%s", riotBaseUrl, summonerID)
-	request, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("X-Riot-Token", apiKey)
+	req := createRequest("GET", url, apiKey)
+	defer fasthttp.ReleaseRequest(req)
 
-	response, err := httpClient.Do(request)
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(resp)
+
+	err := fasthttp.Do(req, resp)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
-	defer response.Body.Close()
+
+	statusCode := resp.StatusCode()
+	if statusCode != fasthttp.StatusOK {
+		return nil, fmt.Errorf("Riot API returned non-200 status code %d", statusCode)
+	}
 
 	var leagueData []map[string]interface{}
-	decoder := json.NewDecoder(response.Body)
-	if err := decoder.Decode(&leagueData); err != nil {
-		return nil, err
+	err = json.Unmarshal(resp.Body(), &leagueData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	for _, entry := range leagueData {
 		if queue, ok := entry["queueType"].(string); ok && queue == "RANKED_SOLO_5x5" {
 			// Save to cache
-			cacheMutex.Lock()
-			leagueDataCache[summonerID] = CacheItem{Data: entry, Timestamp: time.Now()}
-			cacheMutex.Unlock()
+			leagueDataCache.Set(summonerID, entry, cache.DefaultExpiration)
 
 			return entry, nil
 		}
