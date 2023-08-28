@@ -54,7 +54,9 @@ var regionMapping = map[string]string{
 
 type UrlRequest struct {
 	Url    string `json:"url"`
-	Region string `json:"region"` // New field to capture region value
+	Region string `json:"region"`
+	Count  int    `json:"count"`
+	Start  int    `json:"start"`
 }
 
 type SummonerData struct {
@@ -127,12 +129,15 @@ func SearchHandler(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid region"})
 	}
 
+	count := request.Count
+	start := request.Start
+
 	summoner, err := getSummonerData(fmt.Sprintf("https://%s%s", riotBaseUrl, strings.TrimSpace(request.Url)), apiKey)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch summoner data"})
 	}
 
-	matchIDs, err := fetchMatchesByPUUID(summoner.PUUID, apiKey, request.Region)
+	matchIDs, err := fetchMatchesByPUUID(summoner.PUUID, apiKey, request.Region, start, count)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch matches"})
 	}
@@ -200,10 +205,10 @@ func getPlatformForRegion(region string) string {
 	return domain
 }
 
-const baseURLFormatForMatches = "https://%s/lol/match/v5/matches/by-puuid/%s/ids?start=0&count=5"
+const baseURLFormatForMatches = "https://%s/lol/match/v5/matches/by-puuid/%s/ids?start=%d&count=%d"
 
-func fetchMatchesByPUUID(puuid string, apiKey string, region string) ([]string, error) {
-	url := fmt.Sprintf(baseURLFormatForMatches, getPlatformForRegion(region), strings.TrimSpace(puuid))
+func fetchMatchesByPUUID(puuid string, apiKey string, region string, start int, count int) ([]string, error) {
+	url := fmt.Sprintf(baseURLFormatForMatches, getPlatformForRegion(region), strings.TrimSpace(puuid), start, count)
 
 	req := createRequest("GET", url, apiKey)
 	defer fasthttp.ReleaseRequest(req)
@@ -350,6 +355,7 @@ func fetchAndProcessMatchDetailsForIDs(matchIDs []string, apiKey string, puuid s
 type ParticipantData struct {
 	MatchId                        string `json:"matchId"`
 	IsMainParticipant              bool   `json:"isMainParticipant"`
+	QueueDescription               string `json:"queueDescription"`
 	Assists                        int    `json:"assists"`
 	BaronKills                     int    `json:"baronKills"`
 	BountyLevel                    int    `json:"bountyLevel"`
@@ -461,11 +467,105 @@ type ParticipantData struct {
 	Losses                         int    `json:"losses"`
 }
 
+var queueIdMap = map[int]string{
+	0:    "Custom",
+	2:    "Blind",
+	4:    "Ranked",
+	6:    "Ranked",
+	7:    "Co-op vs AI",
+	8:    "3v3 Normal games",
+	9:    "3v3 Ranked Flex games",
+	14:   "5v5 Draft Pick games",
+	16:   "5v5 Dominion Blind Pick games",
+	17:   "5v5 Dominion Draft Pick games",
+	25:   "Dominion Co-op vs AI games",
+	31:   "Co-op vs AI Intro Bot",
+	32:   "Co-op vs AI Beginner Bot",
+	33:   "Co-op vs AI Intermediate Bot",
+	41:   "3v3 Ranked Team games",
+	42:   "Ranked",
+	52:   "Twisted Treeline Co-op vs AI games",
+	61:   "5v5 Team Builder games",
+	65:   "ARAM",
+	67:   "ARAM Co-op vs AI games",
+	70:   "One for All games",
+	72:   "1v1 Snowdown Showdown games",
+	73:   "2v2 Snowdown Showdown games",
+	75:   "6v6 Hexakill games",
+	76:   "Ultra Rapid Fire games",
+	78:   "One For All: Mirror Mode games",
+	83:   "Co-op vs AI Ultra Rapid Fire games",
+	91:   "Doom Bots Rank 1 games",
+	92:   "Doom Bots Rank 2 games",
+	93:   "Doom Bots Rank 5 games",
+	96:   "Ascension games",
+	98:   "Twisted Treeline 6v6 Hexakill games",
+	100:  "Butcher's Bridge 5v5 ARAM games",
+	300:  "Legend of the Poro King games",
+	310:  "Nemesis games",
+	313:  "Black Market Brawlers games",
+	315:  "Nexus Siege games",
+	317:  "Definitely Not Dominion games",
+	318:  "ARURF games",
+	325:  "All Random games",
+	400:  "Draft",
+	410:  "Ranked",
+	420:  "Ranked",
+	430:  "5v5 Blind Pick games",
+	440:  "Flex",
+	450:  "ARAM",
+	460:  "3v3 Blind Pick games",
+	470:  "3v3 Ranked Flex games",
+	600:  "Blood Hunt Assassin games",
+	610:  "Dark Star: Singularity games",
+	700:  "Summoner's Rift Clash games",
+	720:  "ARAM Clash",
+	800:  "Twisted Treeline Co-op vs. AI Intermediate Bot games",
+	810:  "Twisted Treeline Co-op vs. AI Intro Bot games",
+	820:  "Twisted Treeline Co-op vs. AI Beginner Bot games",
+	830:  "Co-op vs. AI Intro Bot games",
+	840:  "Rift Co-op vs. AI Beginner Bot games",
+	850:  "Co-op vs. AI Intermediate Bot games",
+	900:  "ARURF games",
+	910:  "Ascension games",
+	920:  "Legend of the Poro King games",
+	940:  "Nexus Siege games",
+	950:  "Doom Bots Voting games",
+	960:  "Doom Bots Standard games",
+	980:  "Star Guardian Invasion: Normal games",
+	990:  "Star Guardian Invasion: Onslaught games",
+	1000: "PROJECT: Hunters games",
+	1010: "Snow ARURF games",
+	1020: "One for All games",
+	1030: "Odyssey Extraction: Intro games",
+	1040: "Odyssey Extraction: Cadet games",
+	1050: "Odyssey Extraction: Crewmember games",
+	1060: "Odyssey Extraction: Captain games",
+	1070: "Odyssey Extraction: Onslaught games",
+	1090: "Teamfight Tactics games",
+	1100: "Ranked Teamfight Tactics games",
+	1110: "Teamfight Tactics Tutorial games",
+	1111: "Teamfight Tactics test games",
+	1200: "Nexus Blitz games",
+	1300: "Nexus Blitz games",
+	1400: "Ultimate Spellbook games",
+	1700: "Arena",
+	1900: "Pick URF games",
+	2000: "Tutorial 1",
+	2010: "Tutorial 2",
+	2020: "Tutorial 3",
+}
+
 func ExtractParticipantData(matchData map[string]interface{}, metadata map[string]interface{}, apiKey, region string, mainParticipantIndex int) ([]ParticipantData, error) {
-	// Access the info key to get the participants data
 	info, exists := matchData["info"].(map[string]interface{})
 	if !exists {
 		return nil, errors.New("'info' key not found in matchData")
+	}
+
+	queueId := safeInt(info, "queueId")
+	queueDescription, exists := queueIdMap[queueId]
+	if !exists {
+		queueDescription = "Unknown Game Type"
 	}
 
 	participants, ok := info["participants"].([]interface{})
@@ -492,6 +592,8 @@ func ExtractParticipantData(matchData map[string]interface{}, metadata map[strin
 		if err != nil {
 			return nil, err
 		}
+
+		data.QueueDescription = queueDescription
 
 		if i == mainParticipantIndex {
 			// Ensure summonerId exists before fetching league data

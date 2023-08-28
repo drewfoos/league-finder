@@ -1,5 +1,36 @@
 const apiUrl = "http://127.0.0.1:3000";
+window.searchSummoner = searchSummoner;
+import imagesLoaded from 'imagesloaded';
 
+let isFreshSearch = true; // Track if it's a fresh search
+
+document.getElementById("show-more").addEventListener("click", showMore);
+
+let start = 0;
+let count = 5;
+
+async function showMore() {
+    const showMoreButton = document.getElementById("show-more");
+    showMoreButton.disabled = true;
+    showMoreButton.textContent = "Loading...";
+    
+    start += count;
+    await sendToBackend();
+    
+    showMoreButton.disabled = false;
+    showMoreButton.textContent = "Show More";
+}
+
+
+
+function preloadImage(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.src = src;
+        img.onload = resolve;
+        img.onerror = reject;
+    });
+}
 
 function generateItemsGrid(participant) {
     const items = [participant.item0, participant.item1, participant.item2, participant.item3, participant.item4, participant.item5];
@@ -38,63 +69,87 @@ function generateSummonerSection(participant) {
 
 
 async function sendToBackend() {
+
+    document.getElementById("loading").style.display = 'block';
+
+    if (isFreshSearch) {
+        count = 5;
+        start = 0;
+        document.querySelector("#profile-info").innerHTML = ''; // Clear existing content only for fresh searches
+        document.getElementById("show-more").style.display = 'none';
+        isFreshSearch = false;
+    }
+
     const searchValue = document.querySelector("#search-box").value;
     const regionValue = document.querySelector("select").value;
     const url = `${apiUrl}/search`;
 
     const riotUrl = `/lol/summoner/v4/summoners/by-name/${searchValue}`;
 
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ url: riotUrl, region: regionValue })
-    });
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ url: riotUrl, region: regionValue, count: count, start: start, })
+        });
 
-    if (response.ok) {
-        const data = await response.json();
-
-        // const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        // const link = document.createElement('a');
-        // link.href = window.URL.createObjectURL(blob);
-        // link.download = 'response.json';
-        // document.getElementById('body').appendChild(link);
-        // link.click();
-        // document.getElementById('body').removeChild(link);
-        
-        document.querySelector("#profile-info").innerHTML = '';
-        
-        const allParticipants = data.data;
-        
-        // Group participants by matchId
-        const matches = groupBy(allParticipants, 'matchId');
-        console.log('Grouped matches:', matches); // Add this line
-
-        const mainParticipant = allParticipants.find(participant => participant.isMainParticipant);
-        if (mainParticipant) {
-            const summonerSectionHTML = generateSummonerSection(mainParticipant);
-            document.querySelector("#profile-info").innerHTML = summonerSectionHTML;
+        if (!response.ok) {
+            const errorData = await response.json();
+            const errorText = `Error: ${errorData.error}`;
+            console.error(errorText);
+            document.querySelector("#profile-info").innerHTML = `<div class="error">${errorText}</div>`;
+            document.getElementById("loading").style.display = 'none';
+            return;
         }
 
+        const data = await response.json();
+        const allParticipants = data.data;
+
+        // Group participants by matchId
+        const matches = groupBy(allParticipants, 'matchId');
+
+        const mainParticipant = allParticipants.find(participant => participant.isMainParticipant);
+
+        const fragment = document.createDocumentFragment();
+
+        if (mainParticipant && start === 0) {
+            const summonerSectionHTML = generateSummonerSection(mainParticipant);
+            const summonerSection = document.createElement('div');
+            summonerSection.innerHTML = summonerSectionHTML;
+            fragment.appendChild(summonerSection);
+        }
+
+        const preloadPromises = [];
+
         // For each match, find the main participant and the other participants
-        Object.values(matches).forEach(matchParticipants => {
+        for (const matchParticipants of Object.values(matches)) {
             const mainParticipant = matchParticipants.find(participant => participant.isMainParticipant);
 
             if (mainParticipant) {
                 const participantCard = document.createElement('div');
                 participantCard.className = `card ${mainParticipant.win ? 'win' : 'lose'}`;
-                
+
                 const kdaHTML = `<span class="kills">${mainParticipant.kills}</span>/<span class="deaths">${mainParticipant.deaths}</span>/<span class="assists">${mainParticipant.assists}</span>`;
                 const statusText = mainParticipant.win ? 'Victory' : 'Defeat';
-                
+
                 const championImgUrl = `./league_data/img/champion/${mainParticipant.championName}.png`;
+                preloadPromises.push(preloadImage(championImgUrl));
+
+                // Preload other participants' images
+                matchParticipants.forEach(participant => {
+                    const championImgUrl = `./league_data/img/champion/${participant.championName}.png`;
+                    preloadPromises.push(preloadImage(championImgUrl));
+                });
+
                 const itemsGrid = generateItemsGrid(mainParticipant);
 
                 participantCard.innerHTML = `
                     <img src="${championImgUrl}" alt="${mainParticipant.championName} Icon">
                     <div class="card-content">
                         <div class="kda-status-container">
+                            <div class="queue-description">${mainParticipant.queueDescription}</div>
                             <div class="card-title">${kdaHTML}</div>
                             <div class="card-status">${statusText}</div>
                         </div>
@@ -105,15 +160,32 @@ async function sendToBackend() {
                     </div>
                 `;
 
-                document.querySelector("#profile-info").appendChild(participantCard);
+                fragment.appendChild(participantCard);
             }
+        }
+
+        await Promise.all(preloadPromises);
+
+        document.querySelector("#profile-info").appendChild(fragment);
+
+        // Hide loading message when all images are loaded
+        imagesLoaded(document.querySelector("#profile-info"), function() {
+            document.getElementById("loading").style.display = 'none';
         });
-    } else {
-        const errorText = await response.text();
-        console.error("Failed to fetch data:", errorText);
-        document.querySelector("#profile-info").innerHTML = `<div class="error">${errorText}</div>`;
+        document.getElementById("show-more").style.display = 'block';
+    } catch (error) {
+        console.error('Error:', error);
+        document.querySelector("#profile-info").innerHTML = `<div class="error">Error: ${error.message}</div>`;
+        document.getElementById("loading").style.display = 'none';
     }
 }
+
+
+
+
+
+
+
 
 
 // Helper function to group an array of objects by a key
@@ -130,17 +202,17 @@ function generateOtherParticipants(participants) {
 
     const leftParticipantsHTML = leftParticipants.map(participant => {
         const championImgUrl = `./league_data/img/champion/${participant.championName}.png`;
-        return `<div class="other-participant">
-            <div class="other-participant-name">${participant.summonerName}</div>
+        return `<div class="other-participant left-participant">
+            <div class="other-participant-name" onclick="searchSummoner(event, '${participant.summonerName}')">${participant.summonerName}</div>
             <img src="${championImgUrl}" alt="${participant.championName} Icon">
         </div>`;
     }).join('');
 
     const rightParticipantsHTML = rightParticipants.map(participant => {
         const championImgUrl = `./league_data/img/champion/${participant.championName}.png`;
-        return `<div class="other-participant">
+        return `<div class="other-participant right-participant">
             <img src="${championImgUrl}" alt="${participant.championName} Icon">
-            <div class="other-participant-name">${participant.summonerName}</div>
+            <div class="other-participant-name" onclick="searchSummoner(event, '${participant.summonerName}')">${participant.summonerName}</div>
         </div>`;
     }).join('');
 
@@ -155,24 +227,15 @@ function generateOtherParticipants(participants) {
 }
 
 
+function searchSummoner(event, summonerName) {
+    event.stopPropagation();
+    document.querySelector("#search-box").value = summonerName;
+    isFreshSearch = true; // Mark as a fresh search
+    sendToBackend();
+}
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-document.getElementById("search-button").addEventListener("click", sendToBackend);
+document.getElementById("search-button").addEventListener("click", function() {
+    isFreshSearch = true;
+    sendToBackend();
+});
