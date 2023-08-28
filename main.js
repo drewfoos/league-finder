@@ -68,6 +68,8 @@ function generateSummonerSection(participant) {
 
 
 
+const preloadedImages = new Set();
+
 async function sendToBackend() {
 
     document.getElementById("loading").style.display = 'block';
@@ -81,6 +83,7 @@ async function sendToBackend() {
     }
 
     const searchValue = document.querySelector("#search-box").value;
+    sessionStorage.setItem('lastSearched', searchValue);
     const regionValue = document.querySelector("select").value;
     const url = `${apiUrl}/search`;
 
@@ -135,15 +138,24 @@ async function sendToBackend() {
                 const statusText = mainParticipant.win ? 'Victory' : 'Defeat';
 
                 const championImgUrl = `./league_data/img/champion/${mainParticipant.championName}.png`;
-                preloadPromises.push(preloadImage(championImgUrl));
+
+                if (!preloadedImages.has(championImgUrl)) {
+                    preloadPromises.push(preloadImage(championImgUrl));
+                    preloadedImages.add(championImgUrl);
+                }
 
                 // Preload other participants' images
                 matchParticipants.forEach(participant => {
                     const championImgUrl = `./league_data/img/champion/${participant.championName}.png`;
-                    preloadPromises.push(preloadImage(championImgUrl));
+
+                    if (!preloadedImages.has(championImgUrl)) {
+                        preloadPromises.push(preloadImage(championImgUrl));
+                        preloadedImages.add(championImgUrl);
+                    }
                 });
 
                 const itemsGrid = generateItemsGrid(mainParticipant);
+
 
                 participantCard.innerHTML = `
                     <img src="${championImgUrl}" alt="${mainParticipant.championName} Icon">
@@ -177,15 +189,18 @@ async function sendToBackend() {
         console.error('Error:', error);
         document.querySelector("#profile-info").innerHTML = `<div class="error">Error: ${error.message}</div>`;
         document.getElementById("loading").style.display = 'none';
+        document.getElementById("show-more").style.display = 'block';
     }
 }
 
 
-
-
-
-
-
+document.addEventListener('DOMContentLoaded', (event) => {
+    const lastSearched = sessionStorage.getItem('lastSearched');
+    if (lastSearched) {
+        document.querySelector("#search-box").value = lastSearched;
+        sendToBackend();
+    }
+});
 
 
 // Helper function to group an array of objects by a key
@@ -195,6 +210,22 @@ function groupBy(array, key) {
         return result;
     }, {});
 }
+
+
+
+
+function searchSummoner(event, summonerName) {
+    event.stopPropagation();
+    document.querySelector("#search-box").value = summonerName;
+    isFreshSearch = true; // Mark as a fresh search
+    sendToBackend();
+}
+
+
+document.getElementById("search-button").addEventListener("click", function() {
+    isFreshSearch = true;
+    sendToBackend();
+});
 
 function generateOtherParticipants(participants) {
     const leftParticipants = participants.slice(0, 5);
@@ -225,17 +256,3 @@ function generateOtherParticipants(participants) {
         </div>
     </div>`;
 }
-
-
-function searchSummoner(event, summonerName) {
-    event.stopPropagation();
-    document.querySelector("#search-box").value = summonerName;
-    isFreshSearch = true; // Mark as a fresh search
-    sendToBackend();
-}
-
-
-document.getElementById("search-button").addEventListener("click", function() {
-    isFreshSearch = true;
-    sendToBackend();
-});
